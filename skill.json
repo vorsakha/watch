@@ -1,0 +1,14 @@
+{
+  "name": "watch",
+  "telegramCommands": [
+    {
+      "command": "watch",
+      "description": "Watch one movie or episode from script text",
+      "handler": "scripts/watch_session.py",
+      "args": [
+        "{text}"
+      ]
+    }
+  ],
+  "callbackHandlers": []
+}

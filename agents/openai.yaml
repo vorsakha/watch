@@ -1,0 +1,3 @@
+display_name: Watch
+short_description: Scene-by-scene script watching with selective reactions and watch history memory.
+default_prompt: Use $watch to fetch a movie or TV episode script from IMSDb first, fallback to transcribed anime transcripts when needed, enrich context with TMDB metadata, process one scene at a time, and surface reactions only for major moments. Append surfaced reactions to WATCH_LOG.md for continuity.
