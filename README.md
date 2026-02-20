@@ -20,8 +20,8 @@
   - deaths/significant moments
   - act/episode endings
   - surprising/funny beats
-- Logs surfaced session memory to `WATCH_LOG.md`.
-- Enforces single active session with lock file: `./cache/.watch_session.lock`.
+- Logs surfaced session memory to `<workspace>/WATCH_LOG.md`.
+- Enforces single active session with lock file: `<workspace>/cache/.watch_session.lock`.
 
 ## Repository Structure
 
@@ -85,6 +85,20 @@ Use either:
 - CLI override: `--tmdb-api-key`
 
 If TMDB is unavailable, sessions continue with warnings.
+
+## Workspace Path Resolution
+
+`watch` resolves workspace root in this order:
+
+1. `WATCH_WORKSPACE`
+2. `OPENCLAW_WORKSPACE`
+3. `ASCENSION_WORKSPACE`
+4. `~/.openclaw/workspace`
+
+Default paths:
+
+- watch log: `<workspace>/WATCH_LOG.md`
+- cache/lock dir: `<workspace>/cache`
 
 ## Notes
 

@@ -62,5 +62,6 @@ python3 scripts/watch_log_status.py
 
 - TMDB key env var: `TMDB_API_KEY`
 - Or pass explicit key: `--tmdb-api-key`
-- Session memory log path: `--watch-log` (default `./WATCH_LOG.md`)
-- Cache/lock path: `--cache-dir` (default `./cache`)
+- Workspace resolution: `WATCH_WORKSPACE`, then `OPENCLAW_WORKSPACE`, then `ASCENSION_WORKSPACE`, else `~/.openclaw/workspace`
+- Session memory log path: `--watch-log` (default `<workspace>/WATCH_LOG.md`)
+- Cache/lock path: `--cache-dir` (default `<workspace>/cache`)

@@ -110,6 +110,19 @@ SCENE_HEADING_RE = re.compile(
 CHARACTER_RE = re.compile(r"^[A-Z][A-Z0-9 .\-']{2,}$")
 
 
+def resolve_workspace_root() -> Path:
+    for key in ("WATCH_WORKSPACE", "OPENCLAW_WORKSPACE", "ASCENSION_WORKSPACE"):
+        raw = os.environ.get(key, "").strip()
+        if raw:
+            return Path(raw).expanduser().resolve()
+    return (Path.home() / ".openclaw" / "workspace").resolve()
+
+
+OPENCLAW_WORKSPACE = resolve_workspace_root()
+DEFAULT_WATCH_LOG_PATH = (OPENCLAW_WORKSPACE / "WATCH_LOG.md").resolve()
+DEFAULT_CACHE_DIR = (OPENCLAW_WORKSPACE / "cache").resolve()
+
+
 def _slug(title: str) -> str:
     return re.sub(r"\s+", "-", title.strip())
 
@@ -550,8 +563,8 @@ def main() -> None:
     parser.add_argument("--episode", type=int, default=None, help="Episode number for TV episodes")
     parser.add_argument("--source-url", default=None, help="Optional fallback transcript URL")
     parser.add_argument("--tmdb-api-key", default=None, help="Optional TMDB API key override (else TMDB_API_KEY env)")
-    parser.add_argument("--watch-log", default="./WATCH_LOG.md", help="Path to markdown watch log")
-    parser.add_argument("--cache-dir", default="./cache", help="Path to cache/lock directory")
+    parser.add_argument("--watch-log", default=str(DEFAULT_WATCH_LOG_PATH), help="Path to markdown watch log")
+    parser.add_argument("--cache-dir", default=str(DEFAULT_CACHE_DIR), help="Path to cache/lock directory")
     parser.add_argument("--source-timeout-sec", type=int, default=15, help="Script source HTTP timeout")
     parser.add_argument("--tmdb-timeout-sec", type=int, default=10, help="TMDB HTTP timeout")
     parser.add_argument("--max-scene-chars", type=int, default=4200, help="Max chars stored per scene")
