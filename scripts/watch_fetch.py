@@ -15,10 +15,18 @@ def main() -> None:
     parser.add_argument("--episode", type=int, default=None)
     parser.add_argument("--source-url", default=None)
     parser.add_argument("--timeout-sec", type=int, default=15)
+    parser.add_argument("--subtitle-language", default="en")
+    parser.add_argument("--subtitle-max-candidates", type=int, default=5)
     args = parser.parse_args()
 
     target = _parse_target(args.query, movie=args.movie, season=args.season, episode=args.episode)
-    source, trace, warnings = fetch_script_text(target, timeout_sec=args.timeout_sec, source_url=args.source_url)
+    source, trace, warnings = fetch_script_text(
+        target,
+        timeout_sec=args.timeout_sec,
+        source_url=args.source_url,
+        subtitle_language=args.subtitle_language,
+        subtitle_max_candidates=args.subtitle_max_candidates,
+    )
     payload = {
         "target": _model_dump(target),
         "source": _model_dump(source),

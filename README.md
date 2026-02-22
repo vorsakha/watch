@@ -8,6 +8,7 @@
   1. IMSDb (`imsdb.com`)
   2. Anime fallback (`transcribedanimescripts.tumblr.com`)
   3. Generic transcript URL (`--source-url`)
+  4. Subtitle fallback (`subtitlecat.com`)
 - Enriches context from TMDB:
   - title
   - air/release date
@@ -63,6 +64,12 @@ Provide generic transcript fallback URL:
 
 ```bash
 python3 scripts/watch_session.py "Some Title" --source-url "https://example.com/transcript"
+```
+
+Tune subtitle fallback behavior:
+
+```bash
+python3 scripts/watch_session.py "Some Title" --subtitle-language "en" --subtitle-max-candidates 5
 ```
 
 Fetch-only debug:

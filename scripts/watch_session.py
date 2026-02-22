@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -26,7 +26,7 @@ class WatchTarget:
 
 @dataclass
 class SourceCandidate:
-    provider: Literal["imsdb", "transcribed_anime", "generic_transcript"]
+    provider: Literal["imsdb", "transcribed_anime", "generic_transcript", "subtitlecat"]
     url: str | None = None
     confidence: float = 0.0
     script_text: str | None = None
@@ -213,19 +213,158 @@ def _fetch_generic(source_url: str | None, timeout_sec: int) -> SourceCandidate:
     return SourceCandidate(provider="generic_transcript", url=source_url, confidence=0.55, script_text=text)
 
 
+SUBTITLE_TIMESTAMP_RE = re.compile(
+    r"^\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}\s+-->\s+\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}(?:\s+.*)?$"
+)
+SUBTITLE_TIMESTAMP_SHORT_RE = re.compile(
+    r"^\d{1,2}:\d{2}[,.]\d{1,3}\s+-->\s+\d{1,2}:\d{2}[,.]\d{1,3}(?:\s+.*)?$"
+)
+SUBTITLE_INDEX_RE = re.compile(r"^\d+$")
+SUBTITLE_TAG_RE = re.compile(r"</?[^>]+>")
+SUBTITLE_STYLE_RE = re.compile(r"\{\\[^}]+\}")
+HEARING_IMPAIRED_RE = re.compile(r"^\[[^\]]+\]$|^\([^)]+\)$")
+
+
+def _extract_text_from_subtitle_payload(payload: str) -> str:
+    lines: list[str] = []
+    for raw_line in payload.splitlines():
+        line = raw_line.strip().replace("\ufeff", "")
+        if not line:
+            continue
+        upper = line.upper()
+        if upper == "WEBVTT" or upper.startswith("NOTE "):
+            continue
+        if SUBTITLE_INDEX_RE.match(line):
+            continue
+        if SUBTITLE_TIMESTAMP_RE.match(line) or SUBTITLE_TIMESTAMP_SHORT_RE.match(line):
+            continue
+        if HEARING_IMPAIRED_RE.match(line):
+            continue
+
+        line = SUBTITLE_TAG_RE.sub("", line)
+        line = SUBTITLE_STYLE_RE.sub("", line)
+        line = re.sub(r"\s+", " ", line).strip()
+        if line:
+            lines.append(line)
+    return "\n".join(lines).strip()
+
+
+def _search_subtitlecat(target: WatchTarget, language: str, timeout_sec: int, max_candidates: int) -> list[str]:
+    query = quote_plus(target.query)
+    search_url = f"https://www.subtitlecat.com/index.php?search={query}"
+    html = _fetch_url(search_url, timeout_sec)
+    soup = BeautifulSoup(html, "html.parser")
+
+    wanted_lang = language.lower().strip()
+
+    def collect(require_language: bool) -> list[str]:
+        candidates: list[str] = []
+        seen: set[str] = set()
+        for anchor in soup.select("a[href]"):
+            href = anchor.get("href", "").strip()
+            text = anchor.get_text(" ", strip=True).lower()
+            href_lower = href.lower()
+            if not href:
+                continue
+            if not any(token in href_lower for token in ("subtitle", "subtitles", ".srt", ".vtt", "download")) and "subtitle" not in text:
+                continue
+            if require_language and wanted_lang and wanted_lang not in text and wanted_lang not in href_lower:
+                continue
+            url = urljoin("https://www.subtitlecat.com/", href)
+            if url in seen:
+                continue
+            seen.add(url)
+            candidates.append(url)
+            if len(candidates) >= max(1, max_candidates):
+                break
+        return candidates
+
+    language_candidates = collect(require_language=True)
+    if language_candidates:
+        return language_candidates
+    return collect(require_language=False)
+
+
+def _download_subtitlecat_candidate(candidate_url: str, timeout_sec: int) -> tuple[str, str]:
+    payload = _fetch_url(candidate_url, timeout_sec)
+    lower_url = candidate_url.lower()
+    if lower_url.endswith(".srt") or lower_url.endswith(".vtt"):
+        return payload, candidate_url
+
+    soup = BeautifulSoup(payload, "html.parser")
+    for anchor in soup.select("a[href]"):
+        href = anchor.get("href", "").strip()
+        lower = href.lower()
+        if not href:
+            continue
+        if ".srt" in lower or ".vtt" in lower:
+            subtitle_url = urljoin(candidate_url, href)
+            return _fetch_url(subtitle_url, timeout_sec), subtitle_url
+
+    return payload, candidate_url
+
+
+def _fetch_subtitlecat(
+    target: WatchTarget,
+    timeout_sec: int,
+    subtitle_language: str = "en",
+    subtitle_max_candidates: int = 5,
+) -> tuple[SourceCandidate, list[str]]:
+    trace: list[str] = []
+    try:
+        candidates = _search_subtitlecat(
+            target,
+            language=subtitle_language,
+            timeout_sec=timeout_sec,
+            max_candidates=subtitle_max_candidates,
+        )
+    except requests.RequestException as exc:
+        raise SourceError("SUBTITLE_SEARCH_FAILED", str(exc)) from exc
+    if not candidates:
+        raise SourceError("SUBTITLE_NOT_FOUND", f"No Subtitle Cat candidates found for {target.query}")
+    trace.append("source:subtitlecat:search:success")
+
+    last_error: SourceError | None = None
+    for candidate_url in candidates:
+        try:
+            payload, resolved_url = _download_subtitlecat_candidate(candidate_url, timeout_sec)
+            text = _extract_text_from_subtitle_payload(payload)
+            if len(text) < 250:
+                raise SourceError("SUBTITLE_TEXT_TOO_SHORT", f"Subtitle text too short from {resolved_url}")
+            trace.append("source:subtitlecat:download:success")
+            return (
+                SourceCandidate(provider="subtitlecat", url=resolved_url, confidence=0.45, script_text=text),
+                trace,
+            )
+        except requests.RequestException as exc:
+            last_error = SourceError("SUBTITLE_DOWNLOAD_FAILED", str(exc))
+        except SourceError as exc:
+            last_error = exc
+
+    if last_error:
+        raise last_error
+    raise SourceError("SUBTITLE_NOT_FOUND", f"No usable subtitle payload found for {target.query}")
+
+
 def _is_anime_query(query: str) -> bool:
     q = query.lower()
     tokens = ["anime", "ova", "naruto", "one piece", "bleach", "attack on titan", "my hero", "jujutsu"]
     return any(token in q for token in tokens)
 
 
-def fetch_script_text(target: WatchTarget, timeout_sec: int, source_url: str | None = None) -> tuple[SourceCandidate, list[str], list[str]]:
+def fetch_script_text(
+    target: WatchTarget,
+    timeout_sec: int,
+    source_url: str | None = None,
+    subtitle_language: str = "en",
+    subtitle_max_candidates: int = 5,
+) -> tuple[SourceCandidate, list[str], list[str]]:
     trace: list[str] = []
     warnings: list[str] = []
 
-    providers = ["imsdb", "transcribed_anime", "generic_transcript"]
+    providers = ["imsdb", "transcribed_anime", "generic_transcript", "subtitlecat"]
     if _is_anime_query(target.query):
-        providers = ["imsdb", "transcribed_anime", "generic_transcript"]
+        providers = ["imsdb", "transcribed_anime", "generic_transcript", "subtitlecat"]
 
     last_error: SourceError | None = None
     for provider in providers:
@@ -234,8 +373,16 @@ def fetch_script_text(target: WatchTarget, timeout_sec: int, source_url: str | N
                 source = _fetch_imsdb(target, timeout_sec)
             elif provider == "transcribed_anime":
                 source = _fetch_transcribed_anime(target, timeout_sec)
-            else:
+            elif provider == "generic_transcript":
                 source = _fetch_generic(source_url, timeout_sec)
+            else:
+                source, subtitle_trace = _fetch_subtitlecat(
+                    target,
+                    timeout_sec,
+                    subtitle_language=subtitle_language,
+                    subtitle_max_candidates=subtitle_max_candidates,
+                )
+                trace.extend(subtitle_trace)
             trace.append(f"source:{provider}:success")
             return source, trace, warnings
         except SourceError as exc:
@@ -507,6 +654,8 @@ def run_watch_session(
     source_timeout_sec: int,
     tmdb_timeout_sec: int,
     max_scene_chars: int,
+    subtitle_language: str = "en",
+    subtitle_max_candidates: int = 5,
 ) -> WatchResult:
     target = _parse_target(query, movie=movie, season=season, episode=episode)
     result = WatchResult(target=target)
@@ -514,7 +663,13 @@ def run_watch_session(
     lock_path = _acquire_lock(cache_dir)
     try:
         try:
-            source, trace, warnings = fetch_script_text(target, timeout_sec=source_timeout_sec, source_url=source_url)
+            source, trace, warnings = fetch_script_text(
+                target,
+                timeout_sec=source_timeout_sec,
+                source_url=source_url,
+                subtitle_language=subtitle_language,
+                subtitle_max_candidates=subtitle_max_candidates,
+            )
             result.source = source
             result.fallback_trace.extend(trace)
             result.warnings.extend(warnings)
@@ -568,6 +723,8 @@ def main() -> None:
     parser.add_argument("--source-timeout-sec", type=int, default=15, help="Script source HTTP timeout")
     parser.add_argument("--tmdb-timeout-sec", type=int, default=10, help="TMDB HTTP timeout")
     parser.add_argument("--max-scene-chars", type=int, default=4200, help="Max chars stored per scene")
+    parser.add_argument("--subtitle-language", default="en", help="Preferred subtitle language for subtitle fallback")
+    parser.add_argument("--subtitle-max-candidates", type=int, default=5, help="Max Subtitle Cat candidates to try")
     args = parser.parse_args()
 
     result = run_watch_session(
@@ -582,6 +739,8 @@ def main() -> None:
         source_timeout_sec=args.source_timeout_sec,
         tmdb_timeout_sec=args.tmdb_timeout_sec,
         max_scene_chars=args.max_scene_chars,
+        subtitle_language=args.subtitle_language,
+        subtitle_max_candidates=args.subtitle_max_candidates,
     )
     print(json.dumps(_model_dump(result), indent=2))
 

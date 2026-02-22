@@ -1,6 +1,6 @@
 ---
 name: watch
-description: Watch one TV episode or movie by fetching script text (IMSDb first, anime transcript fallback), enriching with TMDB metadata, processing scene-by-scene, and surfacing only high-impact reactions while logging session memory in WATCH_LOG.md.
+description: Watch one TV episode or movie by fetching script text (IMSDb first, anime and transcript fallbacks, then subtitles), enriching with TMDB metadata, processing scene-by-scene, and surfacing only high-impact reactions while logging session memory in WATCH_LOG.md.
 user-invocable: true
 disable-model-invocation: false
 ---
@@ -14,10 +14,11 @@ Use this skill when the user asks to watch a TV episode or movie from script tex
 1. Use `web_fetch` first to scrape raw script text from IMSDb.
 2. If IMSDb fails or query is anime, fallback to `transcribedanimescripts.tumblr.com`.
 3. If both fail, use user-provided generic transcript URL.
-4. Enrich with TMDB metadata (title, air/release date, synopsis, rating, cast).
-5. Parse script scene by scene and process one scene at a time.
-6. Surface only high-impact reactions and process all other scenes silently.
-7. Append session memory to workspace `WATCH_LOG.md`.
+4. If script providers still fail, fallback to subtitles from `subtitlecat.com`.
+5. Enrich with TMDB metadata (title, air/release date, synopsis, rating, cast).
+6. Parse script scene by scene and process one scene at a time.
+7. Surface only high-impact reactions and process all other scenes silently.
+8. Append session memory to workspace `WATCH_LOG.md`.
 
 ## Script Commands
 
